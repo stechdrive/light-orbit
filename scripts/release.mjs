@@ -5,7 +5,7 @@ import {readFile,mkdir,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 
 const repo=process.env.GITHUB_REPOSITORY,commit=process.env.GITHUB_SHA;
-if(process.env.GITHUB_ACTIONS!=='true'||process.env.GITHUB_REF!=='refs/heads/main'||!/^[-\w.]+\/[-\w.]+$/.test(repo||'')||! /^[a-f0-9]{40}$/.test(commit||''))throw new Error('Release requires the main branch workflow.');
+if(process.env.GITHUB_ACTIONS!=='true'||process.env.GITHUB_REF!=='refs/heads/main'||!/^[-\w.]+\/[-\w.]+$/.test(repo||'')||!/^[a-f0-9]{40}$/.test(commit||''))throw new Error('Release requires the main branch workflow.');
 const gh=args=>execFileSync('gh',args,{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
 const api=path=>JSON.parse(gh(['api',`repos/${repo}/${path}`]));
 if(api('commits/main').sha!==commit)throw new Error('A newer commit is ready; skip this release.');
@@ -18,30 +18,33 @@ const ref=api(`git/matching-refs/tags/${tag}`).find(ref=>ref.ref===`refs/tags/${
 if(ref&&(ref.object.type!=='commit'||ref.object.sha!==commit))throw new Error('This version belongs to a different commit; increment the version.');
 const listReleases=()=>JSON.parse(gh(['api','--paginate','--slurp',`repos/${repo}/releases?per_page=100`])).flat();
 const releases=listReleases();
-let current=releases.find(release=>release.tag_name===tag);
-await mkdir('.local',{recursive:true});await writeFile('.local/release-body.txt',version);
+let current=releases.find(release=>release.tag_name===tag)||releases.find(release=>release.draft&&release.name===version&&release.tag_name.startsWith('untagged-'));
+await mkdir('.local',{recursive:true});
+const update=async(method,path,fields)=>{
+  await writeFile('.local/release.json',JSON.stringify(fields));
+  return JSON.parse(gh(['api','--method',method,`repos/${repo}/${path}`,'--input','.local/release.json']));
+};
+const metadata={tag_name:tag,target_commitish:commit,name:version,body:version,prerelease:false};
 if(!current){
-  gh(['release','create',tag,'--repo',repo,'--target',commit,'--draft','--title',version,'--notes-file','.local/release-body.txt']);
-  current=listReleases().find(release=>release.tag_name===tag);
-  if(!current)throw new Error('Draft release was not created.');
+  current=await update('POST','releases',{...metadata,draft:true});
 }
-if(current.draft&&!ref&&current.target_commitish!==commit){
-  gh(['api','--method','PATCH',`repos/${repo}/releases/${current.id}`,'-f',`target_commitish=${commit}`]);
-  current=api(`releases/${current.id}`);
+if(current.draft){
+  current=await update('PATCH',`releases/${current.id}`,{...metadata,draft:true});
+  if(current.tag_name!==tag||current.target_commitish!==commit)throw new Error('Draft does not match the source commit.');
 }
 const existing=current.assets.find(item=>item.name==='LightOrbit.exe');
 if(!current.draft&&(!ref||!existing?.digest?.startsWith('sha256:')||existing.size<100000||existing.state!=='uploaded'))throw new Error('Published executable is incomplete.');
-if(current.draft&&!ref&&current.target_commitish!==commit)throw new Error('Draft belongs to another commit.');
 const expectedDigest=current.draft?digest:existing.digest,expectedSize=current.draft?bytes.length:existing.size;
 if(existing?.digest!==expectedDigest){
-  gh(['release','upload',tag,asset,'--repo',repo,'--clobber']);
+  if(existing)gh(['api','--method','DELETE',`repos/${repo}/releases/assets/${existing.id}`]);
+  gh(['api','--method','POST',`https://uploads.github.com/repos/${repo}/releases/${current.id}/assets?name=LightOrbit.exe`,'--header','Content-Type: application/octet-stream','--input',asset]);
 }
 current=api(`releases/${current.id}`);
 const uploaded=current.assets.find(item=>item.name==='LightOrbit.exe');
 if(uploaded?.digest!==expectedDigest||uploaded.size!==expectedSize||uploaded.state!=='uploaded')throw new Error('Executable verification failed.');
 for(const extra of current.assets.filter(item=>item.name!=='LightOrbit.exe'))gh(['api','--method','DELETE',`repos/${repo}/releases/assets/${extra.id}`]);
-gh(['release','edit',tag,'--repo',repo,'--draft=false','--prerelease=false','--latest','--title',version,'--notes-file','.local/release-body.txt']);
+await update('PATCH',`releases/${current.id}`,{...metadata,draft:false,make_latest:'true'});
 const published=api('releases/latest');
 if(published.tag_name!==tag||published.body!==version||published.assets.length!==1||published.assets[0].digest!==expectedDigest)throw new Error('Published release verification failed.');
-for(const old of releases.filter(release=>release.tag_name!==tag))gh(['api','--method','DELETE',`repos/${repo}/releases/${old.id}`]);
+for(const old of releases.filter(release=>release.id!==published.id))gh(['api','--method','DELETE',`repos/${repo}/releases/${old.id}`]);
 console.log(`Published ${version}: LightOrbit.exe (${expectedDigest})`);
