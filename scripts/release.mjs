@@ -16,12 +16,18 @@ const bytes=await readFile(asset),digest='sha256:'+createHash('sha256').update(b
 if(bytes.length<100000||bytes.toString('ascii',0,2)!=='MZ')throw new Error('Missing Windows executable.');
 const ref=api(`git/matching-refs/tags/${tag}`).find(ref=>ref.ref===`refs/tags/${tag}`);
 if(ref&&(ref.object.type!=='commit'||ref.object.sha!==commit))throw new Error('This version belongs to a different commit; increment the version.');
-const releases=JSON.parse(gh(['api','--paginate','--slurp',`repos/${repo}/releases?per_page=100`])).flat();
+const listReleases=()=>JSON.parse(gh(['api','--paginate','--slurp',`repos/${repo}/releases?per_page=100`])).flat();
+const releases=listReleases();
 let current=releases.find(release=>release.tag_name===tag);
 await mkdir('.local',{recursive:true});await writeFile('.local/release-body.txt',version);
 if(!current){
   gh(['release','create',tag,'--repo',repo,'--target',commit,'--draft','--title',version,'--notes-file','.local/release-body.txt']);
-  current=api(`releases/tags/${tag}`);
+  current=listReleases().find(release=>release.tag_name===tag);
+  if(!current)throw new Error('Draft release was not created.');
+}
+if(current.draft&&!ref&&current.target_commitish!==commit){
+  gh(['api','--method','PATCH',`repos/${repo}/releases/${current.id}`,'-f',`target_commitish=${commit}`]);
+  current=api(`releases/${current.id}`);
 }
 const existing=current.assets.find(item=>item.name==='LightOrbit.exe');
 if(!current.draft&&(!ref||!existing?.digest?.startsWith('sha256:')||existing.size<100000||existing.state!=='uploaded'))throw new Error('Published executable is incomplete.');
@@ -30,7 +36,7 @@ const expectedDigest=current.draft?digest:existing.digest,expectedSize=current.d
 if(existing?.digest!==expectedDigest){
   gh(['release','upload',tag,asset,'--repo',repo,'--clobber']);
 }
-current=api(`releases/tags/${tag}`);
+current=api(`releases/${current.id}`);
 const uploaded=current.assets.find(item=>item.name==='LightOrbit.exe');
 if(uploaded?.digest!==expectedDigest||uploaded.size!==expectedSize||uploaded.state!=='uploaded')throw new Error('Executable verification failed.');
 for(const extra of current.assets.filter(item=>item.name!=='LightOrbit.exe'))gh(['api','--method','DELETE',`repos/${repo}/releases/assets/${extra.id}`]);
