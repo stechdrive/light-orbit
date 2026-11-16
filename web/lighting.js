@@ -1,3 +1,5 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { add, cross, normalize, project, scale } from './math.js';
 
 export const FILL_SPREAD_DEGREES = 35;

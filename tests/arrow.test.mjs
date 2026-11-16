@@ -1,3 +1,5 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ARROW, EXTENT, MAX_ARROW_EXTENSION, arrowLayout, arrowMesh, arrowAppearance, arrowVisibility } from '../web/arrow.js';

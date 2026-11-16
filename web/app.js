@@ -1,6 +1,8 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { angles, direction, dragDirection, clamp, wrapAngle, basis } from './math.js';
 import { LIGHTS, FRONT_CAMERA, defaultState, validateState, restoreAutosavedState, History } from './state.js';
-import { OrbitRenderer, exportCanvas } from './renderer.js';
+import { OrbitRenderer, ExportRenderer, exportCanvas } from './renderer.js';
 import { PRESETS, presetLights } from './presets.js';
 import { arrowVisibility } from './arrow.js';
 
@@ -8,13 +10,13 @@ const $=id=>document.getElementById(id);
 const STORAGE_KEY='light-orbit.scene.v1';
 let state=defaultState(), storageAvailable=true;
 try{const stored=localStorage.getItem(STORAGE_KEY);if(stored){const parsed=JSON.parse(stored);state=restoreAutosavedState(parsed);if(parsed.version!==state.version)localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}}catch{storageAvailable=false;}
-const history=new History(state), renderer=new OrbitRenderer($('viewport'));
+const history=new History(state), renderer=new OrbitRenderer($('viewport')), previewRenderer=new ExportRenderer($('preview'));
 for(const group of [...new Set(PRESETS.map(p=>p.group))]){
   const optgroup=document.createElement('optgroup');optgroup.label=group;
   for(const preset of PRESETS.filter(p=>p.group===group)){const option=document.createElement('option');option.value=preset.id;option.textContent=preset.label;optgroup.append(option);}
   $('preset').append(optgroup);
 }
-let mode='view', pending=false, drag=null, toastTimer=null;
+let mode='view', pending=false, drag=null, toastTimer=null, controlsDirty=false, viewDirty=false;
 const native=window.chrome?.webview;
 const nativeRequests=new Map();
 if(native){
@@ -38,7 +40,7 @@ function syncPreset(){
   $('preset').value=state.presetId;$('mirror').setAttribute('aria-pressed',state.mirrored);$('mirror').classList.toggle('active',state.mirrored);
   $('preset-status').textContent=state.presetId==='custom'?'手動で調整中':state.mirrored?'3灯のセット・反転':'3灯のセット';
 }
-function markCustom(){state.presetId='custom';state.mirrored=false;syncPreset();}
+function markCustom(){if(state.presetId==='custom'&&!state.mirrored)return;state.presetId='custom';state.mirrored=false;syncPreset();}
 $('preset').addEventListener('change',event=>{
   const id=event.target.value;if(id==='custom'){markCustom();commit();return;}
   state.lights=presetLights(id,state.mirrored);state.presetId=id;state.selected='key';syncControls();commit();
@@ -47,16 +49,15 @@ $('mirror').addEventListener('click',()=>{
   for(const light of Object.values(state.lights))light.direction[0]*=-1;
   state.mirrored=!state.mirrored;syncControls();commit();
 });
-function requestRender(){if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;render();});}
+function requestRender(){if(pending)return;pending=true;requestAnimationFrame(()=>{if(controlsDirty)syncControls(false);else if(viewDirty)syncView();pending=false;render();});}
 function render(){
   const rect=$('viewport').getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,2),size=Math.max(100,Math.round(rect.width*ratio));
   renderer.render(state,{editing:true,size,pixelRatio:ratio});
-  syncOcclusion();
-  const preview=exportCanvas(state,60),context=$('preview').getContext('2d');context.clearRect(0,0,60,60);context.drawImage(preview,0,0);
+  syncOcclusion(renderer.hitTargets.find(t=>t.key===state.selected)?.visibility);
+  previewRenderer.render(state,60);
   $('camera-readout').textContent=`${Math.round(state.camera.azimuth)}° / ${Math.round(state.camera.elevation)}°`;
 }
-function syncOcclusion(){
-  const visibility=arrowVisibility(state.lights[state.selected].direction,basis(state.camera));
+function syncOcclusion(visibility=arrowVisibility(state.lights[state.selected].direction,basis(state.camera))){
   const label=visibility.fullyHidden?'奥側・球の裏':visibility.occluded?'奥側・一部隠れ':visibility.behind?'奥側':Math.abs(visibility.depth)<.005?'真横':'手前側';
   const badge=$('light-depth');if(badge.textContent!==label)badge.textContent=label;
   badge.dataset.side=visibility.fullyHidden?'hidden':visibility.behind?'back':'front';
@@ -64,7 +65,8 @@ function syncOcclusion(){
   const name=LIGHTS[state.selected].name.replace('ライト','');
   control.textContent=mode==='light'?`画面をドラッグして奥の${name}を回転`:`奥の${name}を動かす`;
 }
-function syncControls(){
+function syncControls(schedule=true){
+  controlsDirty=false;
   for(const [id,l] of Object.entries(state.lights)){
     document.querySelector(`[data-row="${id}"]`).classList.toggle('selected',state.selected===id);
     document.querySelector(`[data-light="${id}"]`).setAttribute('aria-pressed',state.selected===id);
@@ -76,9 +78,10 @@ function syncControls(){
   $('intensity').value=Math.round(light.intensity*100);$('intensity-value').textContent=`${Math.round(light.intensity*100)}%`;
   $('shading').value=state.shading;$('guides').checked=state.guides;$('export-size').value=state.size;$('background').value=state.background;$('export-lights').value=state.exportLights;
   $('preview-size').innerHTML=`${state.size} × ${state.size} <span>px</span>`;
-  syncPreset();syncView();syncHistory();requestRender();
+  syncPreset();syncView();syncHistory();if(schedule)requestRender();
 }
 function syncView(){
+  viewDirty=false;
   const c=state.camera;
   const current=Math.abs(c.azimuth)<.1&&Math.abs(c.elevation)<.1?'front':Math.abs(c.azimuth-18)<.1&&Math.abs(c.elevation-14)<.1?'angle':Math.abs(c.elevation-89.5)<.1?'top':null;
   document.querySelectorAll('[data-view]').forEach(button=>{button.classList.toggle('active',button.dataset.view===current);button.setAttribute('aria-pressed',button.dataset.view===current);});
@@ -124,8 +127,9 @@ $('viewport').addEventListener('pointermove',event=>{
   if(!drag){const p=getPointer(event);$('viewport').classList.toggle('over-pin',!!renderer.hitTest(p.x,p.y));return;}
   if(drag.id!==event.pointerId)return;
   const dx=event.clientX-drag.x,dy=event.clientY-drag.y,size=$('viewport').clientWidth;
-  if(drag.target){const light=state.lights[drag.target];light.direction=dragDirection(light.direction,dx,dy,state.camera,size);markCustom();syncControls();}
-  else{state.camera.azimuth=wrapAngle(state.camera.azimuth-dx*180/size);state.camera.elevation=clamp(state.camera.elevation+dy*180/size,-89.5,89.5);syncView();requestRender();}
+  if(drag.target){const light=state.lights[drag.target];light.direction=dragDirection(light.direction,dx,dy,state.camera,size);markCustom();controlsDirty=true;}
+  else{state.camera.azimuth=wrapAngle(state.camera.azimuth-dx*180/size);state.camera.elevation=clamp(state.camera.elevation+dy*180/size,-89.5,89.5);viewDirty=true;}
+  requestRender();
   drag.x=event.clientX;drag.y=event.clientY;
 });
 function endDrag(event){if(!drag||event.pointerId!==drag.id)return;drag=null;$('viewport').classList.remove('dragging');commit();}
@@ -167,11 +171,20 @@ $('import-file').addEventListener('change',async event=>{
 });
 $('help').addEventListener('click',()=>$('help-dialog').showModal());$('close-help').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',event=>{if(event.target===$('help-dialog')){const r=event.target.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)event.target.close();}});
+let licensesLoaded=false;
+$('licenses').addEventListener('toggle',async()=>{
+  if(!$('licenses').open||licensesLoaded)return;
+  licensesLoaded=true;
+  try{
+    const texts=await Promise.all(['LICENSE','THIRD_PARTY_NOTICES.txt'].map(async file=>{const response=await fetch(`./${file}`);if(!response.ok)throw new Error();return response.text();}));
+    $('license-text').textContent=texts.join('\n\n');
+  }catch{licensesLoaded=false;$('license-text').textContent='ライセンスを読み込めませんでした。開き直してお試しください。';}
+});
 let installPrompt=null;
 window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;$('install').hidden=false;});
 $('install').addEventListener('click',async()=>{if(!installPrompt)return;await installPrompt.prompt();installPrompt=null;$('install').hidden=true;});
 window.addEventListener('appinstalled',()=>$('install').hidden=true);
-if('serviceWorker' in navigator&&!native&&!new URLSearchParams(location.search).has('dev')){navigator.serviceWorker.register('./sw.js').catch(()=>{$('storage-status').textContent='オフライン準備ができませんでした';});}
+if('serviceWorker' in navigator&&!native&&!new URLSearchParams(location.search).has('dev')){navigator.serviceWorker.register('./sw.js',{updateViaCache:'none'}).catch(()=>{$('storage-status').textContent='オフライン準備ができませんでした';});}
 new ResizeObserver(requestRender).observe($('stage'));
 syncControls();
 if(!storageAvailable)$('storage-status').textContent='前回の設定を読み込めませんでした';

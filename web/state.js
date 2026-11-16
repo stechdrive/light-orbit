@@ -1,3 +1,5 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { clamp, normalize, wrapAngle } from './math.js';
 import { PRESETS, DEFAULT_PRESET, presetLights } from './presets.js';
 

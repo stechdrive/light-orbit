@@ -1,3 +1,5 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { project, add, scale, cross, normalize } from './math.js';
 
 export const EXTENT = 1.98;
@@ -45,10 +47,9 @@ export function arrowMesh(direction, frame, layout = arrowLayout(direction, fram
   return {vertices,faces,width,normal};
 }
 
-export function arrowVisibility(direction, frame, layout = arrowLayout(direction, frame)) {
+export function arrowVisibility(direction, frame, layout = arrowLayout(direction, frame), vertices = arrowMesh(direction,frame,layout).vertices.map(v=>project(v,frame))) {
   const projected = project(direction, frame), radius = Math.hypot(projected[0], projected[1]);
   const behind = projected[2] < -1e-9;
-  const vertices = arrowMesh(direction,frame,layout).vertices.map(v=>project(v,frame));
   const outerRadius = Math.max(...vertices.map(v=>Math.hypot(v[0],v[1]))) + .04;
   return { behind, occluded: behind && radius * layout.tip < 1,
     fullyHidden: behind && outerRadius < 1, depth: projected[2] };

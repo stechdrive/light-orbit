@@ -3,6 +3,13 @@
 !/.gitattributes
 !/README.md
 !/package.json
+!/LICENSE
+!/THIRD_PARTY_NOTICES.txt
+!/.github/
+/.github/*
+!/.github/workflows/
+/.github/workflows/*
+!/.github/workflows/publish.yml
 !/web/
 /web/*
 !/web/app.js
@@ -31,8 +38,10 @@
 !/scripts/build.mjs
 !/scripts/icons.mjs
 !/scripts/serve.mjs
+!/scripts/release.mjs
 !/tests/
 /tests/*
 !/tests/arrow.test.mjs
 !/tests/geometry.test.mjs
 !/tests/lighting.test.mjs
+!/tests/service-worker.test.mjs

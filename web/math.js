@@ -1,3 +1,5 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 export const PI = Math.PI;
 export const radians = degrees => degrees * PI / 180;
 export const degrees = radians => radians * 180 / PI;

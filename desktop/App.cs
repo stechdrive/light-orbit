@@ -1,3 +1,5 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 using System;
 using System.IO;
 using System.IO.Compression;
@@ -13,8 +15,8 @@ using Microsoft.Web.WebView2.WinForms;
 
 [assembly: AssemblyTitle("Light Orbit")]
 [assembly: AssemblyDescription("アニメ美術のためのライティング指示ツール")]
-[assembly: AssemblyVersion("0.5.0.0")]
-[assembly: AssemblyFileVersion("0.5.0.0")]
+[assembly: AssemblyVersion("0.5.1.0")]
+[assembly: AssemblyFileVersion("0.5.1.0")]
 
 internal static class Program
 {
@@ -50,7 +52,7 @@ internal static class Program
                         Directory.CreateDirectory(Path.GetDirectoryName(path));
                         using (var input = entry.Open()) using (var output = File.Create(path)) input.CopyTo(output);
                     }
-                File.WriteAllText(completed, "0.5.0");
+                File.WriteAllText(completed, "0.5.1");
             }
             SetDllDirectory(AssetRoot);
             AppDomain.CurrentDomain.AssemblyResolve += delegate(object sender, ResolveEventArgs e)
@@ -118,7 +120,13 @@ internal sealed partial class OrbitWindow : Form
                 Uri uri;
                 if (!Uri.TryCreate(ev.Uri, UriKind.Absolute, out uri) || uri.Scheme != "https" || uri.Host != "light-orbit.example") ev.Cancel = true;
             };
-            browser.CoreWebView2.NewWindowRequested += delegate(object s, CoreWebView2NewWindowRequestedEventArgs ev) { ev.Handled = true; };
+            browser.CoreWebView2.NewWindowRequested += delegate(object s, CoreWebView2NewWindowRequestedEventArgs ev)
+            {
+                ev.Handled = true;
+                Uri uri;
+                if (ev.IsUserInitiated && Uri.TryCreate(ev.Uri, UriKind.Absolute, out uri) && uri.Scheme == "https" && uri.Host == "github.com" && uri.AbsolutePath.StartsWith("/stechdrive/light-orbit/", StringComparison.Ordinal))
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }); } catch { }
+            };
             browser.CoreWebView2.PermissionRequested += delegate(object s, CoreWebView2PermissionRequestedEventArgs ev) { ev.State = CoreWebView2PermissionState.Deny; };
             browser.CoreWebView2.WebMessageReceived += HandleMessage;
             OnBrowserReady();

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 stechdrive
+# SPDX-License-Identifier: GPL-3.0-or-later
 param([string]$OutputDirectory = 'publish')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -13,7 +15,8 @@ if (!(Test-Path -LiteralPath (Join-Path $sdk 'lib\net462\Microsoft.Web.WebView2.
     if (!(Test-Path -LiteralPath $archive)) {
         Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/$version/microsoft.web.webview2.$version.nupkg" -OutFile $archive
     }
-    Expand-Archive -LiteralPath $archive -DestinationPath $sdk -Force
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::ExtractToDirectory($archive, $sdk)
 }
 $payload = Join-Path $projectRoot '.local\payload'
 $expectedPayload = [IO.Path]::GetFullPath((Join-Path $projectRoot '.local\payload'))
@@ -36,7 +39,4 @@ $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $arguments = @('/nologo','/target:winexe','/platform:x64','/optimize+',('/out:' + (Join-Path $publish 'LightOrbit.exe')),('/win32icon:' + (Join-Path $PSScriptRoot 'app.ico')),('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')),('/resource:' + $payloadZip + ',LightOrbit.payload.zip'),'/reference:System.dll','/reference:System.Core.dll','/reference:System.Drawing.dll','/reference:System.Windows.Forms.dll','/reference:System.Web.Extensions.dll','/reference:System.IO.Compression.dll','/reference:System.IO.Compression.FileSystem.dll',('/reference:' + (Join-Path $sdk 'lib\net462\Microsoft.Web.WebView2.Core.dll')),('/reference:' + (Join-Path $sdk 'lib\net462\Microsoft.Web.WebView2.WinForms.dll')),(Join-Path $PSScriptRoot 'App.cs'))
 & $compiler @arguments
 if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
-Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination (Join-Path $publish 'README.md') -Force
-Copy-Item -LiteralPath (Join-Path $sdk 'LICENSE.txt') -Destination (Join-Path $publish 'WEBVIEW2-LICENSE.txt') -Force
-Copy-Item -LiteralPath (Join-Path $sdk 'NOTICE.txt') -Destination (Join-Path $publish 'WEBVIEW2-NOTICE.txt') -Force
 Get-Item -LiteralPath (Join-Path $publish 'LightOrbit.exe') | Select-Object FullName,Length

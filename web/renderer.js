@@ -1,3 +1,5 @@
+// Copyright (C) 2026 stechdrive
+// SPDX-License-Identifier: GPL-3.0-or-later
 import { basis, project, scale, add, normalize, dot, hiddenBySphere } from './math.js';
 import { LIGHTS } from './state.js';
 import { prepareLights, lightResponse, AMBIENT_LEVEL } from './lighting.js';
@@ -28,16 +30,35 @@ function polygonTouchesRect(points,left,top,right,bottom) {
 }
 const arrowSurfaceLight=normalize([-.4,.65,1]);
 const geometryCache = new Map();
+const GEOMETRY_BUDGET=8*1024*1024;
+let geometryBytes=0;
 function sphereGeometry(size) {
-  if(geometryCache.has(size)) return geometryCache.get(size);
-  const values=[];
+  if(geometryCache.has(size)) {
+    const geometry=geometryCache.get(size);geometryCache.delete(size);geometryCache.set(size,geometry);return geometry;
+  }
+  let count=0;
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    const nx=(x+.5)/size*2-1,ny=1-(y+.5)/size*2;
+    if(nx*nx+ny*ny<1)count++;
+  }
+  const result=new Float32Array(count*4);let at=0;
   for(let y=0;y<size;y++) for(let x=0;x<size;x++) {
     const nx=(x+.5)/size*2-1, ny=1-(y+.5)/size*2, r2=nx*nx+ny*ny;
-    if(r2<1) values.push((y*size+x)*4,nx,ny,Math.sqrt(1-r2));
+    if(r2<1){result[at++]=(y*size+x)*4;result[at++]=nx;result[at++]=ny;result[at++]=Math.sqrt(1-r2);}
   }
-  const result=new Float32Array(values);
-  if(geometryCache.size>6) geometryCache.delete(geometryCache.keys().next().value);
-  geometryCache.set(size,result); return result;
+  if(result.byteLength<=GEOMETRY_BUDGET){
+    while(geometryBytes+result.byteLength>GEOMETRY_BUDGET||geometryCache.size>=6){
+      const oldest=geometryCache.keys().next().value;geometryBytes-=geometryCache.get(oldest).byteLength;geometryCache.delete(oldest);
+    }
+    geometryCache.set(size,result);geometryBytes+=result.byteLength;
+  }
+  return result;
+}
+const ringPoints=['xz','yz'].map(plane=>Array.from({length:145},(_,i)=>{
+  const t=i*Math.PI/72;return plane==='xz'?[1.39*Math.sin(t),0,1.39*Math.cos(t)]:[0,1.39*Math.sin(t),1.39*Math.cos(t)];
+}));
+function shadingKey(state,size){
+  return [size,state.camera.azimuth,state.camera.elevation,state.shading,...Object.values(state.lights).flatMap(l=>[l.enabled,l.intensity,...l.direction])].join(',');
 }
 
 export class OrbitRenderer {
@@ -61,25 +82,29 @@ export class OrbitRenderer {
     const labels=[],placedLabels=[];
     this.sphereBounds={center,radius:factor+sphereOutlineWidth};
 
-    const polyline=(points,color,width,dashed=false)=>{
-      ctx.beginPath();points.forEach((p,i)=>{const [x,y]=px(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-      ctx.strokeStyle=color;ctx.lineWidth=width;ctx.setLineDash(dashed?[strokeWidth*2,strokeWidth*2]:[]);ctx.stroke();ctx.setLineDash([]);
+    const drawGuides=(segments,color,width)=>{
+      ctx.beginPath();for(const [a,b] of segments){ctx.moveTo(...px(a));ctx.lineTo(...px(b));}
+      ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
     };
-    const guides=[];
     if(editing && state.guides){
-      for(const plane of ['xz','yz']){
-        const radius=1.39;
-        for(let i=0;i<144;i++){
-          const point=t=>plane==='xz'?[radius*Math.sin(t),0,radius*Math.cos(t)]:[0,radius*Math.sin(t),radius*Math.cos(t)];
-          const a=project(point(i*Math.PI/72),frame),b=project(point((i+1)*Math.PI/72),frame);
-          const hidden=hiddenBySphere(scale(add(a,b),.5));
-          guides.push({a,b,hidden});
+      const key=`${state.camera.azimuth},${state.camera.elevation}`;
+      if(this.guideKey!==key){
+        this.guideKey=key;this.guides={visible:[],hidden:[],front:[]};
+        for(const ring of ringPoints){
+          const points=ring.map(p=>project(p,frame));
+          for(let i=0;i<144;i++){
+            const a=points[i],b=points[i+1],mid=scale(add(a,b),.5),hidden=hiddenBySphere(mid);
+            this.guides[hidden?'hidden':'visible'].push([a,b]);
+            if(!hidden&&mid[2]>0)this.guides.front.push([a,b]);
+          }
         }
       }
-      for(const {a,b,hidden} of guides) if(!hidden) polyline([a,b],dark?'#566358':'#9ea894',strokeWidth*.6);
+      drawGuides(this.guides.visible,'#9ea894',strokeWidth*.6);
     }
 
-    const side=Math.ceil(factor*2), geometry=sphereGeometry(side);
+    const side=Math.ceil(factor*2),key=shadingKey(state,side);
+    if(this.shadingKey!==key){
+    const geometry=sphereGeometry(side);
     if(!this.imageData||this.sphere.width!==side){this.sphere.width=side;this.sphere.height=side;this.imageData=this.sphereCtx.createImageData(side,side);}
     const data=this.imageData.data;
     const lights=prepareLights(state.lights,frame);
@@ -96,30 +121,29 @@ export class OrbitRenderer {
       data[offset+3]=Math.min(255,Math.max(0,nz*side*.45)*255);
     }
     this.sphereCtx.putImageData(this.imageData,0,0);
+    this.shadingKey=key;
+    }
     ctx.drawImage(this.sphere,center-factor,center-factor,factor*2,factor*2);
     ctx.beginPath();ctx.arc(center,center,factor+sphereOutlineWidth*.48,0,Math.PI*2);ctx.strokeStyle='#555555';ctx.lineWidth=sphereOutlineWidth;ctx.stroke();
 
     if(editing && state.guides){
-      for(const {a,b,hidden} of guides){
-        const mid=scale(add(a,b),.5);
-        if(hidden){if(editing) polyline([a,b], '#84937720',strokeWidth*.5);}
-        else if(mid[2]>0) polyline([a,b],dark?'#708068':'#879777',strokeWidth*.6);
-      }
+      drawGuides(this.guides.hidden,'#84937720',strokeWidth*.5);
+      drawGuides(this.guides.front,'#879777',strokeWidth*.6);
     }
 
     const sorted=Object.entries(state.lights).filter(([key,l])=>l.enabled&&(editing||state.exportLights==='all'||key==='key')).sort(([,a],[,b])=>dot(a.direction,frame.front)-dot(b.direction,frame.front));
     for(const [key,light] of sorted){
-      const dir=light.direction, layout=arrowLayout(dir,frame), appearance=arrowAppearance(LIGHTS[key].rgb,layout.depth,editing), visibility=arrowVisibility(dir,frame,layout);
+      const dir=light.direction, layout=arrowLayout(dir,frame), appearance=arrowAppearance(LIGHTS[key].rgb,layout.depth,editing);
+      const mesh=arrowMesh(dir,frame,layout),vertices=mesh.vertices.map(v=>project(v,frame)),visibility=arrowVisibility(dir,frame,layout,vertices);
       const {rgb,outline,rear}=appearance,hp=project(scale(dir,layout.tail),frame);
       const [hx,hy]=px(hp), radius=factor*ARROW.pinRadius;
-      const mesh=arrowMesh(dir,frame,layout),vertices=mesh.vertices.map(v=>project(v,frame));
       const faces=mesh.faces.filter(face=>dot(face.normal,frame.front)>1e-8).map(face=>({
         ...face,points:face.indices.map(i=>vertices[i]),normal:project(face.normal,frame),
         z:face.indices.reduce((sum,i)=>sum+vertices[i][2],0)/face.indices.length,
       }));
       const nearPart=layout.depth>=0?'shaft':'head';
       faces.sort((a,b)=>(a.part===nearPart)-(b.part===nearPart)||a.z-b.z);
-      this.hitTargets.push({key,x:hx,y:hy,radius:Math.max(radius*2.6,editing?17*pixelRatio:radius),depth:hp[2],hidden:hiddenBySphere(hp),fullyHidden:visibility.fullyHidden,polygons:faces.map(f=>f.points.map(px))});
+      this.hitTargets.push({key,visibility,x:hx,y:hy,radius:Math.max(radius*2.6,editing?17*pixelRatio:radius),depth:hp[2],hidden:hiddenBySphere(hp),fullyHidden:visibility.fullyHidden,polygons:faces.map(f=>f.points.map(px))});
 
       ctx.save();
       if(visibility.behind){
@@ -175,10 +199,25 @@ export class OrbitRenderer {
   }
 }
 
-export function exportCanvas(state,size=state.size) {
-  const hi=document.createElement('canvas');
-  new OrbitRenderer(hi).render(state,{size:size*4});
-  const output=document.createElement('canvas');output.width=size;output.height=size;
-  const ctx=output.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(hi,0,0,size,size);
-  return output;
+export class ExportRenderer {
+  constructor(canvas){
+    this.canvas=canvas;this.ctx=canvas.getContext('2d');this.renderer=new OrbitRenderer(document.createElement('canvas'));
+  }
+  render(state,size=state.size){
+    const key=`${shadingKey(state,size)},${state.background},${state.exportLights}`;
+    if(this.key===key)return this.canvas;
+    const output=this.canvas;
+    if(output.width!==size||output.height!==size){output.width=size;output.height=size;}
+    this.renderer.render(state,{size:size*4});
+    this.ctx.clearRect(0,0,size,size);this.ctx.imageSmoothingEnabled=true;this.ctx.imageSmoothingQuality='high';
+    this.ctx.drawImage(this.renderer.canvas,0,0,size,size);this.key=key;
+    return output;
+  }
+  dispose(){
+    this.renderer.canvas.width=0;this.renderer.sphere.width=0;this.renderer.imageData=null;this.renderer.shadingKey=null;this.key=null;
+  }
+}
+export function exportCanvas(state,size=state.size){
+  const renderer=new ExportRenderer(document.createElement('canvas'));
+  try{return renderer.render(state,size);}finally{renderer.dispose();}
 }
