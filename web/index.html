@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f3ef">
+  <meta name="description" content="球とライトを回して、美術へのライティング指示を小さな画像に。">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'self'">
+  <title>Light Orbit — ライト指示</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main class="app">
+  <h1 class="sr-only">Light Orbit</h1>
+  <section class="preset-bar" aria-label="ライトのプリセット">
+    <label for="preset">プリセット</label><select id="preset" aria-label="光源方向のプリセット"><option value="custom">カスタム</option></select>
+    <button id="mirror" class="mirror-button" aria-pressed="false" title="正面ビューを基準に、すべての光源を左右反転">↔ 左右反転</button>
+    <span id="preset-status" class="sr-only">3灯のセット</span>
+    <div class="toolbar-actions"><button id="reset" class="text-button" title="ライトとカメラを初期状態に戻す">初期化</button><button id="install" class="quiet" hidden>アプリに追加</button><button id="help" class="icon-button" aria-label="使い方" title="使い方">?</button></div>
+  </section>
+
+  <div class="workspace">
+    <section class="visual-section" aria-label="ライトと視点の操作">
+      <div class="stage-bar"><div class="segmented" aria-label="ドラッグの操作"><button id="mode-view" class="active" aria-pressed="true">視点を回す</button><button id="mode-light" aria-pressed="false">ライトを回す</button></div><div class="history"><button id="undo" class="icon-button" aria-label="元に戻す" title="元に戻す (Ctrl+Z)">↶</button><button id="redo" class="icon-button" aria-label="やり直す" title="やり直す (Ctrl+Shift+Z)">↷</button></div></div>
+      <div class="stage" id="stage">
+        <canvas id="viewport" tabindex="0" role="img" aria-label="ライティングの立体図。矢印をドラッグして光源を回転、余白をドラッグして視点を回転。矢印キーで選択中の光源を調整。"></canvas>
+        <button id="hidden-light-control" class="hidden-light-control" hidden title="球の裏に隠れているライトを、画面のドラッグで動かします">奥のライトを動かす</button>
+      </div>
+      <div class="view-footer"><span id="interaction-hint" class="sr-only">矢印：ライトを回転 ／ 余白：視点を回転</span><div class="view-presets" aria-label="視点"><button id="camera-reset" data-view="front" class="active" aria-pressed="true" title="ライトの設定を保って、カメラだけを正面0°／0°に戻します">カメラリセット</button><button data-view="angle" aria-pressed="false" title="斜め前から見る">斜め</button><button data-view="top" aria-pressed="false" title="上から見る">上面</button></div><span class="view-state"><span id="view-label">正面</span> <span id="camera-readout"></span></span></div>
+    </section>
+
+    <aside class="controls" aria-label="ライトの設定">
+      <div class="light-list" aria-label="ライトを選択">
+        <div class="light-row selected" data-row="key"><button class="select-light" data-light="key" aria-pressed="true"><span class="light-dot key-dot"></span><span>キー</span></button><span class="always-on">主光源</span></div>
+        <div class="light-row" data-row="fill"><button class="select-light" data-light="fill" aria-pressed="false"><span class="light-dot fill-dot"></span><span>フィル</span></button><label class="switch"><input id="fill-enabled" type="checkbox" aria-label="フィルライトを有効にする"><span></span></label></div>
+        <div class="light-row" data-row="rim"><button class="select-light" data-light="rim" aria-pressed="false"><span class="light-dot rim-dot"></span><span>リム</span></button><label class="switch"><input id="rim-enabled" type="checkbox" aria-label="リムライトを有効にする"><span></span></label></div>
+      </div>
+      <div class="light-detail">
+        <div class="detail-title"><span id="selected-label">キーライト</span><span id="light-depth" class="light-depth" role="status" aria-live="polite" title="現在のカメラから見たライトの位置">手前側</span></div>
+        <div class="slider-field"><label for="azimuth">左右 <span>方位</span></label><div class="number-field"><input id="azimuth-number" type="number" min="-180" max="180" step="1" aria-label="方位の角度"><span>°</span></div><input id="azimuth" type="range" min="-180" max="180" step="1"></div>
+        <div class="slider-field"><label for="elevation">上下 <span>仰角</span></label><div class="number-field"><input id="elevation-number" type="number" min="-90" max="90" step="1" aria-label="仰角の角度"><span>°</span></div><input id="elevation" type="range" min="-90" max="90" step="1"></div>
+        <div class="slider-field intensity-field"><label for="intensity">光の強さ</label><output id="intensity-value" for="intensity">100%</output><input id="intensity" type="range" min="0" max="150" step="5"></div>
+      </div>
+      <div class="look-settings"><label for="shading">陰影</label><select id="shading"><option value="smooth">なめらか</option><option value="cel">セル調</option></select><label class="checkbox-line"><input id="guides" type="checkbox" checked>操作用リング</label></div>
+    </aside>
+  </div>
+
+  <section class="export-section" aria-label="画像の書き出し">
+    <div class="preview-group" title="操作画面と同じ視点で書き出します"><div class="actual-preview checker"><canvas id="preview" width="60" height="60" aria-label="書き出し画像の実寸プレビュー"></canvas></div><div><h2 id="preview-size">60 × 60 <span>px</span></h2><p>実寸・正面</p></div></div>
+    <div class="export-options"><label>画像サイズ<select id="export-size"><option value="60">60 × 60 px</option><option value="120">120 × 120 px</option><option value="240">240 × 240 px</option><option value="512">512 × 512 px</option></select></label><label>背景<select id="background"><option value="transparent">透明</option><option value="white">白</option><option value="dark">濃いグレー</option></select></label><label title="球の陰影には、有効なすべてのライトが反映されます。">書き出す矢印<select id="export-lights"><option value="key">キーのみ</option><option value="all">全ライト</option></select></label></div>
+    <div class="export-buttons"><button id="copy" class="secondary">画像をコピー</button><button id="save" class="primary"><svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M10 2v10m-4-4 4 4 4-4M3 13v4h14v-4"/></svg>PNG保存</button></div>
+  </section>
+  <footer class="app-footer"><span><i></i><span id="storage-status">この端末に自動保存</span></span><button id="export-settings" class="text-button">設定を書き出す</button><button id="import-settings" class="text-button">設定を読み込む</button><input id="import-file" type="file" accept=".json,application/json" hidden></footer>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<dialog id="help-dialog"><div class="dialog-head"><h2>Light Orbit 0.5.0</h2><button id="close-help" class="icon-button" aria-label="閉じる">×</button></div><p>美術への光源指示を、小さな立体図にするツールです。</p><dl><dt>プリセット</dt><dd>正面・斜め前・真横・斜め後ろ・真後ろを、上・水平・下の3段階で選べます。真上・真下も含めて17種類。左右反転は3灯まとめて反転し、視点は維持します。</dd><dt>光の向きを変える</dt><dd>色のついた矢印をドラッグ。球の周りを一周できます。「ライトを回す」にすると、画面のどこからでも選択中の光源を動かせます。</dd><dt>全体を見る</dt><dd>初期視点は正面です。「視点を回す」で余白をドラッグすると、操作画面と書き出しの視点が一緒に回ります。球の中心と光源の位置は変わりません。「カメラリセット」でライト設定を保ったまま視点だけを正面に戻せます。リングは操作の目安で、画像には書き出されません。</dd><dt>奥のライト</dt><dd>矢印は球で遮り、隠れた部分を透かして表示しません。出力画像では、球の外に見える背後の矢印を同系色のくすんだ色で示します。操作画面では「奥側」を表示し、選択中のライトが隠れる境目を輪郭上の短い色線で示します。完全に隠れたら「奥のライトを動かす」でドラッグ操作に切り替えられます。矢印は厚みのある立体で、表面と側面を描き分けます。背後では広い矢じりが球で切り取られます。画面に収まる範囲で長さを補正し、正面・真後ろ付近では滑らかに短くなります。矢印が球へ向かう方向が、光の進む向きです。</dd><dt>角度の基準</dt><dd>カメラをリセットしたときの画面手前が方位0°、画面右が+90°、奥が±180°。上が仰角+90°です。</dd><dt>画像を渡す</dt><dd>標準では、3灯で陰影をつけた球とキーライトの矢印だけを書き出します。「書き出す矢印」を変えても、補助光の陰影は維持されます。実寸プレビューを確認してPNG保存、または画像をコピー。背景を透明にすると指示書にそのまま重ねられます。</dd><dt>ショートカット</dt><dd>矢印キー：ライトを5°ずつ移動（Shiftで1°）／Ctrl+Z：戻す／Ctrl+Shift+Z：やり直す。</dd></dl><p class="help-note">フィルは淡い青、リムは淡い赤紫で球を照らします。背後のキーは球の縁を明るくし、矢印が隠れても逆光を示します。各ライトの方向と強さは自由に変えられます。陰影は方向を伝えるための簡易表示です。</p></dialog>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

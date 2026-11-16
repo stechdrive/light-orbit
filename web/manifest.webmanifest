@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "Light Orbit — ライト指示",
+  "short_name": "Light Orbit",
+  "lang": "ja",
+  "description": "球とライトを回して、美術へのライティング指示を小さな画像に。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f3ef",
+  "theme_color": "#f4f3ef",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
